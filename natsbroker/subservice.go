@@ -40,19 +40,15 @@ type SubService struct {
 	sem       chan struct{}
 }
 
-func Connect(conf SubServiceConfig) (*nats.Conn, error) {
-	nc, err := nats.Connect(conf.ConnectionStr, nats.Name(conf.ClientName))
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
+func NewSubService(conf SubServiceConfig) (*SubService, error) {
+	connConfig := ConnectionConfig{
+		ConnectionStr: conf.ConnectionStr,
+		ClientName:    conf.ClientName,
 	}
 
-	return nc, nil
-}
-
-func NewSubService(conf SubServiceConfig) (*SubService, error) {
-	nc, err := nats.Connect(conf.ConnectionStr, nats.Name(conf.ClientName))
+	nc, err := NewConnection(connConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
+		return nil, fmt.Errorf("failed to create connection: %w", err)
 	}
 
 	return NewSubServiceWithConnection(nc, conf)
