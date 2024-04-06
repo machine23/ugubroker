@@ -26,13 +26,14 @@ type SubService struct {
 	log    *slog.Logger
 	config SubServiceConfig
 
-	nc             *nats.Conn
-	js             jetstream.JetStream
-	stream         jetstream.Stream
-	consumer       jetstream.Consumer
-	subs           []jetstream.ConsumeContext
-	filterSubjects []string
-	handlers       map[string]func(context.Context, []byte) error
+	nc              *nats.Conn
+	js              jetstream.JetStream
+	stream          jetstream.Stream
+	consumer        jetstream.Consumer
+	subs            []jetstream.ConsumeContext
+	filterSubjects  []string
+	handlers        map[string]func(context.Context, []byte) error
+	reuseConnection bool
 
 	mu        sync.RWMutex
 	wg        sync.WaitGroup
@@ -51,10 +52,20 @@ func NewSubService(conf SubServiceConfig) (*SubService, error) {
 		return nil, fmt.Errorf("failed to create connection: %w", err)
 	}
 
-	return NewSubServiceWithConnection(nc, conf)
+	return newSubServiceWithConnection(nc, conf)
 }
 
-func NewSubServiceWithConnection(nc *nats.Conn, conf SubServiceConfig) (*SubService, error) {
+func NewSubServiceUsingConnection(nc *nats.Conn, conf SubServiceConfig) (*SubService, error) {
+	ss, err := newSubServiceWithConnection(nc, conf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create service: %w", err)
+	}
+
+	ss.reuseConnection = true
+	return ss, nil
+}
+
+func newSubServiceWithConnection(nc *nats.Conn, conf SubServiceConfig) (*SubService, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -99,7 +110,9 @@ func (s *SubService) Close() {
 		sub.Stop()
 	}
 
-	s.nc.Close()
+	if !s.reuseConnection {
+		s.nc.Close()
+	}
 
 	s.log.Info("service stopped")
 }
