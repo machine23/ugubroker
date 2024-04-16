@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -224,7 +225,10 @@ func (s *SubService) consumeMessages() error {
 
 	cctx, err := s.consumer.Consume(func(msg jetstream.Msg) {
 		if s.isStopped.Load() {
-			msg.Nak()
+			if err := msg.NakWithDelay(randomDuration(100*time.Millisecond, 2*time.Second)); err != nil {
+				s.log.Error("failed to NAK message", slog.String("error", err.Error()),
+					slog.String("path", "consumeMessages -> s.isStopped.Load()"))
+			}
 			return
 		}
 		s.wg.Add(1)
@@ -236,7 +240,15 @@ func (s *SubService) consumeMessages() error {
 			}()
 			start := time.Now()
 			s.mu.RLock()
-			handler := s.handlers[msg.Subject()]
+			handler, ok := s.handlers[msg.Subject()]
+			if !ok {
+				s.log.Error("handler not found", slog.String("topic", msg.Subject()))
+				if err := msg.NakWithDelay(randomDuration(100*time.Millisecond, 2*time.Second)); err != nil {
+					s.log.Error("failed to NAK message", slog.String("error", err.Error()),
+						slog.String("path", "consumeMessages -> handler not found"))
+				}
+				return
+			}
 			s.mu.RUnlock()
 
 			if err := handler(context.Background(), msg.Data()); err != nil {
@@ -246,10 +258,17 @@ func (s *SubService) consumeMessages() error {
 					slog.String("payload", string(msg.Data())),
 					slog.String("duration", time.Since(start).String()),
 				)
-				msg.Nak()
+				if err := msg.NakWithDelay(randomDuration(5*time.Second, 30*time.Second)); err != nil {
+					s.log.Error("failed to NAK message", slog.String("error", err.Error()),
+						slog.String("path", "consumeMessages -> handler"))
+				}
 				return
 			}
-			msg.Ack()
+			if err := msg.Ack(); err != nil {
+				s.log.Error("failed to ACK message", slog.String("error", err.Error()),
+					slog.String("path", "consumeMessages -> handler"))
+				return
+			}
 			s.log.Info("event handled", slog.String("topic", msg.Subject()), slog.String("duration", time.Since(start).String()))
 		}()
 	})
@@ -263,4 +282,8 @@ func (s *SubService) consumeMessages() error {
 	s.mu.Unlock()
 
 	return nil
+}
+
+func randomDuration(minDur, maxDur time.Duration) time.Duration {
+	return minDur + time.Duration(rand.Int63n(int64(maxDur-minDur)))
 }
