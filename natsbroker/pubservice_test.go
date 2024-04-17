@@ -30,11 +30,12 @@ func TestPublish(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	sub, err := natsbroker.NewSubService(natsbroker.SubServiceConfig{
-		ConnectionStr: c.ConnectionStr,
-		ClientName:    "test-sub",
-		ConsumerName:  "testconsumer",
-		StreamName:    "testpub",
-		NumWorkers:    3,
+		ConnectionStr:  c.ConnectionStr,
+		ClientName:     "test-sub",
+		ConsumerName:   "testconsumer",
+		StreamName:     "testpub",
+		NumWorkers:     3,
+		FilterSubjects: []string{"testpub.>"},
 	})
 
 	require.NoError(t, err)

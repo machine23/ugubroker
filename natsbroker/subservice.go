@@ -2,11 +2,9 @@ package natsbroker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,11 +14,12 @@ import (
 )
 
 type SubServiceConfig struct {
-	ConnectionStr string `env:"NATS_CONNECTION_STR"`
-	ClientName    string `env:"NATS_CLIENT_NAME"`
-	StreamName    string `env:"NATS_STREAM_NAME" env-default:"ugu"`
-	ConsumerName  string `env:"NATS_CONSUMER_NAME"`
-	NumWorkers    int    `env:"NATS_NUM_WORKERS"`
+	ConnectionStr  string `env:"NATS_CONNECTION_STR"`
+	ClientName     string `env:"NATS_CLIENT_NAME"`
+	StreamName     string `env:"NATS_STREAM_NAME" env-default:"ugu"`
+	ConsumerName   string `env:"NATS_CONSUMER_NAME"`
+	NumWorkers     int    `env:"NATS_NUM_WORKERS"`
+	FilterSubjects []string
 }
 
 type SubService struct {
@@ -70,6 +69,10 @@ func newSubServiceWithConnection(nc *nats.Conn, conf SubServiceConfig) (*SubServ
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	if conf.FilterSubjects == nil || len(conf.FilterSubjects) == 0 {
+		return nil, fmt.Errorf("filter subjects cannot be empty")
+	}
+
 	js, err := jetstream.New(nc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JetStream: %w", err)
@@ -84,11 +87,23 @@ func newSubServiceWithConnection(nc *nats.Conn, conf SubServiceConfig) (*SubServ
 		return nil, fmt.Errorf("failed to get stream: %w", err)
 	}
 
+	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
+		Name:           conf.ConsumerName,
+		Durable:        conf.ConsumerName,
+		FilterSubjects: conf.FilterSubjects,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create consumer: %w", err)
+	}
+
 	log := slog.Default().With("module", "messaging/natssub")
 
 	log.Info("service started",
 		slog.String("clientName", conf.ClientName),
-		slog.String("consumerName", conf.ConsumerName))
+		slog.String("consumerName", conf.ConsumerName),
+		slog.String("streamName", conf.StreamName),
+		slog.Any("filterSubjects", conf.FilterSubjects),
+		slog.Int("numWorkers", conf.NumWorkers))
 
 	return &SubService{
 		log:            log,
@@ -96,6 +111,7 @@ func newSubServiceWithConnection(nc *nats.Conn, conf SubServiceConfig) (*SubServ
 		nc:             nc,
 		js:             js,
 		stream:         stream,
+		consumer:       consumer,
 		filterSubjects: []string{},
 		handlers:       make(map[string]func(context.Context, []byte) error),
 		sem:            make(chan struct{}, conf.NumWorkers),
@@ -124,10 +140,6 @@ func (s *SubService) Subscribe(topic string, handler func(context.Context, []byt
 		return fmt.Errorf("service is stopped")
 	}
 
-	if err := s.updateConsumer(topic); err != nil {
-		return err
-	}
-
 	s.mu.Lock()
 	s.handlers[topic] = handler
 	s.mu.Unlock()
@@ -137,86 +149,6 @@ func (s *SubService) Subscribe(topic string, handler func(context.Context, []byt
 	}
 
 	s.log.Info("subscribed to topic", slog.String("topic", topic))
-
-	return nil
-}
-
-func (s *SubService) updateConsumer(topic string) error {
-	if topic == "" {
-		return fmt.Errorf("topic cannot be empty")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if s.consumer == nil {
-		if err := s.createConsumer(ctx, topic); err != nil {
-			return err
-		}
-	}
-
-	return s.updateConsumerConfig(ctx, topic)
-}
-
-func (s *SubService) createConsumer(ctx context.Context, topic string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if topic == "" {
-		return fmt.Errorf("topic cannot be empty")
-	}
-
-	consumer, err := s.stream.Consumer(ctx, s.config.ConsumerName)
-	if err != nil {
-		if errors.Is(err, jetstream.ErrConsumerNotFound) {
-			consumer, err = s.stream.CreateConsumer(ctx, jetstream.ConsumerConfig{
-				Name:           s.config.ConsumerName,
-				Durable:        s.config.ConsumerName,
-				FilterSubjects: []string{topic},
-			})
-			if err != nil {
-				return fmt.Errorf("failed to create consumer: %w", err)
-			}
-			s.log.Info("created consumer",
-				slog.String("consumerName", s.config.ConsumerName),
-				slog.String("streamName", s.config.StreamName),
-				slog.Any("filterSubjects", []string{topic}))
-		} else {
-			return fmt.Errorf("failed to get consumer: %w", err)
-		}
-	}
-
-	s.consumer = consumer
-	return nil
-}
-
-func (s *SubService) updateConsumerConfig(ctx context.Context, topic string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	consumerInfo, err := s.consumer.Info(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get consumer info: %w", err)
-	}
-
-	consumerConf := consumerInfo.Config
-	if consumerConf.FilterSubjects == nil {
-		consumerConf.FilterSubjects = make([]string, 0)
-	}
-	if !slices.Contains(consumerConf.FilterSubjects, topic) {
-		consumerConf.FilterSubjects = append(consumerConf.FilterSubjects, topic)
-		consumer, err := s.stream.UpdateConsumer(ctx, consumerConf)
-		if err != nil {
-			return fmt.Errorf("failed to update consumer: %w", err)
-		}
-
-		s.consumer = consumer
-
-		s.log.Info("consumer updated",
-			slog.String("consumerName", s.config.ConsumerName),
-			slog.String("streamName", s.config.StreamName),
-			slog.Any("filterSubjects", consumerConf.FilterSubjects))
-	}
 
 	return nil
 }

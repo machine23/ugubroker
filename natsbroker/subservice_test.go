@@ -77,11 +77,12 @@ func TestSubscribe(t *testing.T) {
 	require.NoError(t, err)
 
 	broker, err := natsbroker.NewSubService(natsbroker.SubServiceConfig{
-		ConnectionStr: c.ConnectionStr,
-		ClientName:    "test",
-		ConsumerName:  "testconsumer",
-		StreamName:    "teststream",
-		NumWorkers:    3,
+		ConnectionStr:  c.ConnectionStr,
+		ClientName:     "test",
+		ConsumerName:   "testconsumer",
+		StreamName:     "teststream",
+		NumWorkers:     3,
+		FilterSubjects: []string{"test.added", "test.updated"},
 	})
 	require.NoError(t, err)
 	defer broker.Close()
