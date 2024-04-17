@@ -157,6 +157,8 @@ func TestSubscribe(t *testing.T) {
 	require.NoError(t, err)
 	_, err = js.Publish(context.TODO(), "test.updated", []byte(`{"id":"19","username":"user1","type":"updated"}`))
 	require.NoError(t, err)
+	_, err = js.Publish(context.TODO(), "test.some", []byte(`{"id":"20","username":"user1","type":"some"}`))
+	require.NoError(t, err)
 
 	time.Sleep(1 * time.Second)
 

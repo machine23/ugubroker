@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,11 +15,11 @@ import (
 )
 
 type SubServiceConfig struct {
-	ConnectionStr  string `env:"NATS_CONNECTION_STR"`
-	ClientName     string `env:"NATS_CLIENT_NAME"`
-	StreamName     string `env:"NATS_STREAM_NAME" env-default:"ugu"`
-	ConsumerName   string `env:"NATS_CONSUMER_NAME"`
-	NumWorkers     int    `env:"NATS_NUM_WORKERS"`
+	ConnectionStr  string
+	ClientName     string
+	StreamName     string
+	ConsumerName   string
+	NumWorkers     int
 	FilterSubjects []string
 }
 
@@ -31,7 +32,6 @@ type SubService struct {
 	stream          jetstream.Stream
 	consumer        jetstream.Consumer
 	subs            []jetstream.ConsumeContext
-	filterSubjects  []string
 	handlers        map[string]func(context.Context, []byte) error
 	reuseConnection bool
 
@@ -105,16 +105,21 @@ func newSubServiceWithConnection(nc *nats.Conn, conf SubServiceConfig) (*SubServ
 		slog.Any("filterSubjects", conf.FilterSubjects),
 		slog.Int("numWorkers", conf.NumWorkers))
 
+	info, _ := consumer.Info(ctx)
+	consConf := info.Config
+	log.Info("consumer info",
+		slog.Any("config", consConf),
+	)
+
 	return &SubService{
-		log:            log,
-		config:         conf,
-		nc:             nc,
-		js:             js,
-		stream:         stream,
-		consumer:       consumer,
-		filterSubjects: []string{},
-		handlers:       make(map[string]func(context.Context, []byte) error),
-		sem:            make(chan struct{}, conf.NumWorkers),
+		log:      log,
+		config:   conf,
+		nc:       nc,
+		js:       js,
+		stream:   stream,
+		consumer: consumer,
+		handlers: make(map[string]func(context.Context, []byte) error),
+		sem:      make(chan struct{}, conf.NumWorkers),
 	}, nil
 }
 
@@ -138,6 +143,10 @@ func (s *SubService) Subscribe(topic string, handler func(context.Context, []byt
 
 	if s.isStopped.Load() {
 		return fmt.Errorf("service is stopped")
+	}
+
+	if !slices.Contains(s.config.FilterSubjects, topic) {
+		return fmt.Errorf("topic %s is not in filter subjects", topic)
 	}
 
 	s.mu.Lock()
