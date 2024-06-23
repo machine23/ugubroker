@@ -1,4 +1,4 @@
-module github.com/machine23/ugubroker
+module github.com/machine23/ugubroker/v2
 
 go 1.22.0
 

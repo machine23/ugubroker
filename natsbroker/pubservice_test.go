@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/machine23/ugubroker/natsbroker"
+	"github.com/machine23/ugubroker/v2/natsbroker"
 	"github.com/stretchr/testify/require"
 )
 

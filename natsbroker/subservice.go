@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -145,9 +144,9 @@ func (s *SubService) Subscribe(topic string, handler func(context.Context, []byt
 		return fmt.Errorf("service is stopped")
 	}
 
-	if !slices.Contains(s.config.FilterSubjects, topic) {
-		return fmt.Errorf("topic %s is not in filter subjects", topic)
-	}
+	// if !slices.Contains(s.config.FilterSubjects, topic) {
+	// 	return fmt.Errorf("topic %s is not in filter subjects", topic)
+	// }
 
 	s.mu.Lock()
 	s.handlers[topic] = handler
