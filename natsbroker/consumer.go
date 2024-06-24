@@ -12,6 +12,7 @@ import (
 	"github.com/machine23/ugubroker/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"golang.org/x/exp/rand"
 )
 
 const (
@@ -20,27 +21,25 @@ const (
 )
 
 type NATSConsumerConfig struct {
-	ConnectionStr  string
-	ClientName     string
-	StreamName     string
-	ConsumerName   string
-	NumWorkers     int
-	FilterSubjects []string
-
+	ConnectionStr   string
+	ClientName      string
+	StreamName      string
+	ConsumerName    string
+	FilterSubjects  []string
+	NumWorkers      int
 	CreationTimeout time.Duration
 	WorkingTimeout  time.Duration
 }
 
 type NATSConsumer struct {
-	timeout  time.Duration
-	nc       *nats.Conn
-	consumer jetstream.Consumer
-
-	reuseConnection bool
-	wg              sync.WaitGroup
-	isStopped       atomic.Bool
+	consumer        jetstream.Consumer
+	nc              *nats.Conn
 	sem             chan struct{}
 	subs            []jetstream.ConsumeContext
+	wg              sync.WaitGroup
+	timeout         time.Duration
+	isStopped       atomic.Bool
+	reuseConnection bool
 }
 
 func NewNATSConsumer(conf NATSConsumerConfig) (*NATSConsumer, error) {
@@ -116,7 +115,6 @@ func newNATSConsumerWithConnection(nc *nats.Conn, conf NATSConsumerConfig) (*NAT
 		consumer: consumer,
 		sem:      make(chan struct{}, conf.NumWorkers),
 	}, nil
-
 }
 
 func (n *NATSConsumer) Close() {
@@ -167,14 +165,12 @@ func (n *NATSConsumer) Consume(handler ugubroker.MessageHandler) error {
 			}
 		}()
 	})
-
 	if err != nil {
 		return fmt.Errorf("failed to consume: %w", err)
 	}
 
 	n.subs = append(n.subs, cctx)
 	return nil
-
 }
 
 func (n *NATSConsumer) serveMessage(msg jetstream.Msg, handler ugubroker.MessageHandler) error {
@@ -187,4 +183,8 @@ func (n *NATSConsumer) serveMessage(msg jetstream.Msg, handler ugubroker.Message
 	}
 
 	return handler.ServeMessage(ctx, message)
+}
+
+func randomDuration(minDuration, maxDuration time.Duration) time.Duration {
+	return minDuration + time.Duration(rand.Int63n(int64(maxDuration-minDuration)))
 }

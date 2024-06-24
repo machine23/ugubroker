@@ -20,13 +20,11 @@ type PubServiceConfig struct {
 }
 
 type PubService struct {
-	log    *slog.Logger
-	config PubServiceConfig
-
-	nc     *nats.Conn
-	js     jetstream.JetStream
-	stream jetstream.Stream
-
+	js              jetstream.JetStream
+	stream          jetstream.Stream
+	log             *slog.Logger
+	nc              *nats.Conn
+	config          PubServiceConfig
 	reuseConnection bool
 }
 
