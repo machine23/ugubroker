@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/machine23/ugubroker/v2"
+	"github.com/machine23/ugubroker/v2/middleware"
 	"github.com/machine23/ugubroker/v2/natsbroker"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -37,11 +38,11 @@ func TestNATSConsumer(t *testing.T) {
 		ConsumerName:   "testconsumer",
 		StreamName:     "teststream",
 		NumWorkers:     3,
-		FilterSubjects: []string{"test.added", "test.updated"},
+		FilterSubjects: []string{"test.>"},
 	})
 	require.NoError(t, err)
 
-	consumer.Consume(mux)
+	consumer.Consume(middleware.WithSLog(mux))
 
 	expAdded, expUpdated, _ := publishTestMessages(t, 100, js)
 

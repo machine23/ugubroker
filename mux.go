@@ -7,9 +7,7 @@ import (
 	"sync"
 )
 
-var (
-	ErrNoHandlerFound = errors.New("no handler found for topic")
-)
+var ErrNoHandlerFound = errors.New("no handler found for topic")
 
 type Message struct {
 	Topic string
@@ -18,6 +16,12 @@ type Message struct {
 
 type MessageHandler interface {
 	ServeMessage(context.Context, Message) error
+}
+
+type MessageHandlerFunc func(context.Context, Message) error
+
+func (f MessageHandlerFunc) ServeMessage(ctx context.Context, m Message) error {
+	return f(ctx, m)
 }
 
 type MessageMux struct {
