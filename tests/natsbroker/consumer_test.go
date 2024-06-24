@@ -42,7 +42,7 @@ func TestNATSConsumer(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	consumer.Consume(middleware.WithSLog(mux))
+	consumer.Consume(middleware.WithSLog(middleware.SkipNoHandlerError(mux)))
 
 	expAdded, expUpdated, _ := publishTestMessages(t, 100, js)
 
