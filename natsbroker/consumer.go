@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/machine23/ugubroker/v2"
@@ -29,6 +28,11 @@ type NATSConsumerConfig struct {
 	NumWorkers      int
 	CreationTimeout time.Duration
 	WorkingTimeout  time.Duration
+
+	// If set to true, the consumer will receive all messages from the stream.
+	// If set to false, the consumer will only receive messages that sent after
+	// the consumer is created.
+	ReceiveAllMsgs bool
 }
 
 type NATSConsumer struct {
@@ -38,7 +42,6 @@ type NATSConsumer struct {
 	subs            []jetstream.ConsumeContext
 	wg              sync.WaitGroup
 	timeout         time.Duration
-	isStopped       atomic.Bool
 	reuseConnection bool
 }
 
@@ -100,13 +103,43 @@ func newNATSConsumerWithConnection(nc *nats.Conn, conf NATSConsumerConfig) (*NAT
 		return nil, fmt.Errorf("failed to get stream: %w", err)
 	}
 
-	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
-		Name:           conf.ConsumerName,
-		Durable:        conf.ConsumerName,
-		FilterSubjects: conf.FilterSubjects,
-	})
+	start := time.Now()
+
+	consumer, err := stream.Consumer(ctx, conf.ConsumerName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create or update NATS consumer: %w", err)
+		if errors.Is(err, jetstream.ErrConsumerNotFound) {
+			deliverPolicy := jetstream.DeliverByStartTimePolicy
+			if conf.ReceiveAllMsgs {
+				deliverPolicy = jetstream.DeliverAllPolicy
+			}
+			consumer, err = stream.CreateConsumer(ctx, jetstream.ConsumerConfig{
+				Name:           conf.ConsumerName,
+				Durable:        conf.ConsumerName,
+				FilterSubjects: conf.FilterSubjects,
+				DeliverPolicy:  deliverPolicy,
+				OptStartTime:   &start,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to create NATS consumer: %w", err)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to get NATS consumer: %w", err)
+		}
+	}
+
+	cnsmrInfo, err := consumer.Info(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get consumer info: %w", err)
+	}
+
+	if !isFilterSubjectsEqual(cnsmrInfo.Config.FilterSubjects, conf.FilterSubjects) {
+		cnf := cnsmrInfo.Config
+		cnf.FilterSubjects = conf.FilterSubjects
+
+		consumer, err = stream.UpdateConsumer(ctx, cnf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update NATS consumer: %w", err)
+		}
 	}
 
 	return &NATSConsumer{
@@ -121,7 +154,6 @@ func (n *NATSConsumer) Close() {
 	for _, sub := range n.subs {
 		sub.Stop()
 	}
-	n.isStopped.Store(true)
 	n.wg.Wait()
 	if !n.reuseConnection {
 		n.nc.Close()
@@ -130,14 +162,6 @@ func (n *NATSConsumer) Close() {
 
 func (n *NATSConsumer) Consume(handler ugubroker.MessageHandler) error {
 	cctx, err := n.consumer.Consume(func(msg jetstream.Msg) {
-		if n.isStopped.Load() {
-			if err := msg.NakWithDelay(10 * time.Second); err != nil {
-				slog.Error("failed to NAK message", slog.String("error", err.Error()),
-					slog.String("place", "NATSConsumer.Consume -> s.isStopped"))
-			}
-			return
-		}
-
 		n.wg.Add(1)
 		n.sem <- struct{}{}
 
@@ -187,4 +211,18 @@ func (n *NATSConsumer) serveMessage(msg jetstream.Msg, handler ugubroker.Message
 
 func randomDuration(minDuration, maxDuration time.Duration) time.Duration {
 	return minDuration + time.Duration(rand.Int63n(int64(maxDuration-minDuration)))
+}
+
+func isFilterSubjectsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
 }

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/machine23/ugubroker/v2"
-	"github.com/machine23/ugubroker/v2/middleware"
 	"github.com/machine23/ugubroker/v2/natsbroker"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -23,36 +22,111 @@ func TestNATSConsumer(t *testing.T) {
 	c, nc, js := setupTestEnvironment(t, ctx)
 	defer cleanupTestEnvironment(t, ctx, c, nc)
 
-	// Create a new message mux
-	ah := &addedHandler{t: t}
-	uh := &updatedHandler{t: t}
+	t.Run("subscribe", func(t *testing.T) {
+		// Create a new message mux
+		ah := &addedHandler{t: t}
+		uh := &updatedHandler{t: t}
 
-	mux := ugubroker.NewMessageMux()
-	mux.Subscribe("test.added", ah)
-	mux.Subscribe("test.updated", uh)
+		mux := ugubroker.NewMessageMux()
+		mux.Subscribe("test.added", ah)
+		mux.Subscribe("test.updated", uh)
 
-	// Create a new NATSConsumer
-	consumer, err := natsbroker.NewNATSConsumer(natsbroker.NATSConsumerConfig{
-		ConnectionStr:  c.ConnectionStr,
-		ClientName:     "test",
-		ConsumerName:   "testconsumer",
-		StreamName:     "teststream",
-		NumWorkers:     3,
-		FilterSubjects: []string{"test.>"},
+		// Create a new NATSConsumer
+		consumer, err := natsbroker.NewNATSConsumer(natsbroker.NATSConsumerConfig{
+			ConnectionStr:  c.ConnectionStr,
+			ClientName:     "test",
+			ConsumerName:   "testconsumer",
+			StreamName:     "teststream",
+			NumWorkers:     3,
+			FilterSubjects: []string{"test.>"},
+		})
+		require.NoError(t, err)
+
+		consumer.Consume(mux)
+
+		expAdded, expUpdated, _ := publishTestMessages(t, 100, js)
+
+		time.Sleep(1 * time.Second)
+
+		consumer.Close()
+
+		require.Equal(t, expAdded, ah.AddedCount.Load())
+		require.Equal(t, expUpdated, uh.UpdatedCount.Load())
 	})
-	require.NoError(t, err)
 
-	consumer.Consume(middleware.WithSLog(middleware.SkipNoHandlerError(mux)))
+	t.Run("subscribeFunc", func(t *testing.T) {
+		// Create a new message mux
+		var added, updated atomic.Int32
 
-	expAdded, expUpdated, _ := publishTestMessages(t, 100, js)
+		mux := ugubroker.NewMessageMux()
+		mux.SubscribeFunc("test.added", func(_ context.Context, m ugubroker.Message) error {
+			added.Add(1)
+			return nil
+		})
+		mux.SubscribeFunc("test.updated", func(_ context.Context, m ugubroker.Message) error {
+			updated.Add(1)
+			return nil
+		})
 
-	time.Sleep(1 * time.Second)
+		// Create a new NATSConsumer
+		consumer, err := natsbroker.NewNATSConsumer(natsbroker.NATSConsumerConfig{
+			ConnectionStr:  c.ConnectionStr,
+			ClientName:     "test2",
+			ConsumerName:   "testconsumer2",
+			StreamName:     "teststream",
+			NumWorkers:     3,
+			FilterSubjects: []string{"test.added", "test.updated"},
+		})
+		require.NoError(t, err)
 
-	consumer.Close()
+		consumer.Consume(mux)
 
-	require.Equal(t, expAdded, ah.AddedCount.Load())
-	require.Equal(t, expUpdated, uh.UpdatedCount.Load())
+		expAdded, expUpdated, _ := publishTestMessages(t, 100, js)
+		// expAdded, expUpdated, _ := 3, 3, 3
+
+		time.Sleep(1 * time.Second)
+
+		consumer.Close()
+
+		require.Equal(t, expAdded, added.Load())
+		require.Equal(t, expUpdated, updated.Load())
+
+		////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		// Test receiving messages sent while the consumer is closed,
+		// but not deleted from the JetStream.
+		////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+		// publish more messages
+		ea2, eu2, _ := publishTestMessages(t, 100, js)
+		expAdded += ea2
+		expUpdated += eu2
+
+		time.Sleep(1 * time.Second)
+
+		consumer2, err := natsbroker.NewNATSConsumer(natsbroker.NATSConsumerConfig{
+			ConnectionStr:  c.ConnectionStr,
+			ClientName:     "test2",
+			ConsumerName:   "testconsumer2",
+			StreamName:     "teststream",
+			NumWorkers:     3,
+			FilterSubjects: []string{"test.added", "test.updated"},
+		})
+		require.NoError(t, err)
+
+		consumer2.Consume(mux)
+
+		time.Sleep(1 * time.Second)
+
+		consumer2.Close()
+
+		require.Equal(t, expAdded, added.Load())
+		require.Equal(t, expUpdated, updated.Load())
+	})
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// helpers
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 func setupTestEnvironment(t *testing.T, ctx context.Context) (*NatsContainer, *nats.Conn, jetstream.JetStream) {
 	c, err := startContainer(ctx)

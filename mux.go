@@ -42,6 +42,10 @@ func (mux *MessageMux) Subscribe(topic string, handler MessageHandler) {
 	mux.handlers[topic] = handler
 }
 
+func (mux *MessageMux) SubscribeFunc(topic string, handlerFunc func(context.Context, Message) error) {
+	mux.Subscribe(topic, MessageHandlerFunc(handlerFunc))
+}
+
 func (mux *MessageMux) Handler(topic string) MessageHandler {
 	if topic == "" {
 		return nil
