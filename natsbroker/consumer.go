@@ -201,12 +201,7 @@ func (n *NATSConsumer) serveMessage(msg jetstream.Msg, handler ugubroker.Message
 	ctx, cancel := context.WithTimeout(context.Background(), n.timeout)
 	defer cancel()
 
-	message := ugubroker.Message{
-		Topic: msg.Subject(),
-		Data:  msg.Data(),
-	}
-
-	return handler.ServeMessage(ctx, message)
+	return handler.ServeMessage(ctx, msg.Subject(), msg.Data())
 }
 
 func randomDuration(minDuration, maxDuration time.Duration) time.Duration {

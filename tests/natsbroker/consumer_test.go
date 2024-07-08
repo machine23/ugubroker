@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/machine23/ugubroker/v2"
+	"github.com/machine23/ugubroker/v2/middleware"
 	"github.com/machine23/ugubroker/v2/natsbroker"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -42,7 +43,7 @@ func TestNATSConsumer(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		consumer.Consume(mux)
+		consumer.Consume(middleware.WithSLog(mux))
 
 		expAdded, expUpdated, _ := publishTestMessages(t, 100, js)
 
@@ -59,11 +60,11 @@ func TestNATSConsumer(t *testing.T) {
 		var added, updated atomic.Int32
 
 		mux := ugubroker.NewMessageMux()
-		mux.SubscribeFunc("test.added", func(_ context.Context, m ugubroker.Message) error {
+		mux.SubscribeFunc("test.added", func(_ context.Context, _ string, _ []byte) error {
 			added.Add(1)
 			return nil
 		})
-		mux.SubscribeFunc("test.updated", func(_ context.Context, m ugubroker.Message) error {
+		mux.SubscribeFunc("test.updated", func(_ context.Context, _ string, _ []byte) error {
 			updated.Add(1)
 			return nil
 		})
@@ -159,10 +160,10 @@ type addedHandler struct {
 	AddedCount atomic.Int32
 }
 
-func (h *addedHandler) ServeMessage(_ context.Context, m ugubroker.Message) error {
+func (h *addedHandler) ServeMessage(_ context.Context, _ string, data []byte) error {
 	h.AddedCount.Add(1)
 	msg := map[string]interface{}{}
-	err := json.Unmarshal(m.Data, &msg)
+	err := json.Unmarshal(data, &msg)
 	require.NoError(h.t, err)
 
 	msgType, ok := msg["type"].(string)
@@ -177,10 +178,10 @@ type updatedHandler struct {
 	UpdatedCount atomic.Int32
 }
 
-func (h *updatedHandler) ServeMessage(_ context.Context, m ugubroker.Message) error {
+func (h *updatedHandler) ServeMessage(_ context.Context, _ string, data []byte) error {
 	h.UpdatedCount.Add(1)
 	msg := map[string]interface{}{}
-	err := json.Unmarshal(m.Data, &msg)
+	err := json.Unmarshal(data, &msg)
 	require.NoError(h.t, err)
 
 	msgType, ok := msg["type"].(string)

@@ -9,19 +9,19 @@ import (
 
 var ErrNoHandlerFound = errors.New("no handler found for topic")
 
-type Message struct {
-	Topic string
-	Data  []byte
-}
+// type Message struct {
+// 	Topic string
+// 	Data  []byte
+// }
 
 type MessageHandler interface {
-	ServeMessage(context.Context, Message) error
+	ServeMessage(context.Context, string, []byte) error
 }
 
-type MessageHandlerFunc func(context.Context, Message) error
+type MessageHandlerFunc func(context.Context, string, []byte) error
 
-func (f MessageHandlerFunc) ServeMessage(ctx context.Context, m Message) error {
-	return f(ctx, m)
+func (f MessageHandlerFunc) ServeMessage(ctx context.Context, topic string, m []byte) error {
+	return f(ctx, topic, m)
 }
 
 type MessageMux struct {
@@ -42,7 +42,7 @@ func (mux *MessageMux) Subscribe(topic string, handler MessageHandler) {
 	mux.handlers[topic] = handler
 }
 
-func (mux *MessageMux) SubscribeFunc(topic string, handlerFunc func(context.Context, Message) error) {
+func (mux *MessageMux) SubscribeFunc(topic string, handlerFunc func(context.Context, string, []byte) error) {
 	mux.Subscribe(topic, MessageHandlerFunc(handlerFunc))
 }
 
@@ -57,11 +57,11 @@ func (mux *MessageMux) Handler(topic string) MessageHandler {
 	return mux.handlers[topic]
 }
 
-func (mux *MessageMux) ServeMessage(ctx context.Context, m Message) error {
-	h := mux.Handler(m.Topic)
+func (mux *MessageMux) ServeMessage(ctx context.Context, topic string, m []byte) error {
+	h := mux.Handler(topic)
 	if h == nil {
-		return fmt.Errorf("%w: %s", ErrNoHandlerFound, m.Topic)
+		return fmt.Errorf("%w: %s", ErrNoHandlerFound, topic)
 	}
 
-	return h.ServeMessage(ctx, m)
+	return h.ServeMessage(ctx, topic, m)
 }
