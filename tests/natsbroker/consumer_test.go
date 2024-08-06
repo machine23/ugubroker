@@ -60,11 +60,13 @@ func TestNATSConsumer(t *testing.T) {
 		var added, updated atomic.Int32
 
 		mux := ugubroker.NewMessageMux()
-		mux.SubscribeFunc("test.added", func(_ context.Context, _ string, _ []byte) error {
+		mux.SubscribeFunc("test.added", func(_ context.Context, topic string, _ []byte) error {
+			require.Equal(t, "test.added", topic)
 			added.Add(1)
 			return nil
 		})
-		mux.SubscribeFunc("test.updated", func(_ context.Context, _ string, _ []byte) error {
+		mux.SubscribeFunc("test.updated", func(_ context.Context, topic string, _ []byte) error {
+			require.Equal(t, "test.updated", topic)
 			updated.Add(1)
 			return nil
 		})
@@ -160,7 +162,8 @@ type addedHandler struct {
 	AddedCount atomic.Int32
 }
 
-func (h *addedHandler) ServeMessage(_ context.Context, _ string, data []byte) error {
+func (h *addedHandler) ServeMessage(_ context.Context, topic string, data []byte) error {
+	require.Equal(h.t, "test.added", topic)
 	h.AddedCount.Add(1)
 	msg := map[string]interface{}{}
 	err := json.Unmarshal(data, &msg)
@@ -178,7 +181,8 @@ type updatedHandler struct {
 	UpdatedCount atomic.Int32
 }
 
-func (h *updatedHandler) ServeMessage(_ context.Context, _ string, data []byte) error {
+func (h *updatedHandler) ServeMessage(_ context.Context, topic string, data []byte) error {
+	require.Equal(h.t, "test.updated", topic)
 	h.UpdatedCount.Add(1)
 	msg := map[string]interface{}{}
 	err := json.Unmarshal(data, &msg)
